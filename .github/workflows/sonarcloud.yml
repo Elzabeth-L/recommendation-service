@@ -1,0 +1,53 @@
+name: CI/CD pipeline
+
+on:
+  push:
+    branches:
+      - "main"
+      - "pipeline"
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+permissions:
+  pull-requests: read # allows SonarCloud to decorate PRs with analysis results
+
+jobs:
+  Sonarqube:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Analyze with SonarCloud
+        uses: SonarSource/sonarcloud-github-action@4006f663ecaf1f8093e8e4abb9227f6041f52216
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}   # Generate a token on Sonarcloud.io, add it to the secrets of this repo with the name SONAR_TOKEN (Settings > Secrets > Actions > add new repository secret)
+        with:
+          args:
+            -Dsonar.projectKey=Elzabeth-L_recommendation-service
+            -Dsonar.organization=elzabeth-l
+          projectBaseDir: .
+
+  Snyk:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Snyk CLI
+        run: npm install -g snyk
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run Snyk test
+        #uses: snyk/actions/node@master
+        
+        run: snyk test --all-projects #--sarif-file-output=snyk.sarif
+      #   continue-on-error: true
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}  
+      # - name: Upload to github 
+      #   uses: github/codeql-action/upload-sarif@v4
+      #   with:
+      #     sarif_file: snyk.sarif
+
+
