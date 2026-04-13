@@ -1,0 +1,19 @@
+name: Build Docker Image
+
+on:  
+  workflow_dispatch: 
+    inputs:
+      image_tag:
+        description: 'Tag for the Docker image (e.g., v1.0.0)'
+        required: true
+        default: 'latest'
+
+jobs:
+  docker-build:
+    name: Elzabeth
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Docker image
+        run: docker build -t ${{ secrets.DOCKER_USERNAME }}/review-rating-service:${{ inputs.image_tag }} .
