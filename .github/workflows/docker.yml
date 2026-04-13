@@ -1,6 +1,8 @@
 name: Build Docker Image
 
-on:  
+on: 
+  workflow_run:
+    workflows: ["CI/CD pipeline"] # This workflow will be triggered after the successful completion of the "CI/CD pipeline" workflow 
   workflow_dispatch: 
     inputs:
       image_tag:
