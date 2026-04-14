@@ -2,7 +2,7 @@ name: Build Docker Image
 
 on: 
   workflow_run:
-    workflows: ["CI/CD pipeline"] # This workflow will be triggered after the successful completion of the "CI/CD pipeline" workflow 
+    workflows: ["CI/CD pipeline"]
   workflow_dispatch: 
     inputs:
       image_tag:
@@ -11,21 +11,49 @@ on:
         default: 'latest'
 
 permissions:
-  contents: read # allows the workflow to read the repository contents
-  security-events: write # allows the workflow to create security advisories (if needed)
+  contents: read
+  security-events: write
   actions: read
 
 jobs:
   docker-build:
-    name: Elzabeth
     runs-on: ubuntu-latest
+
+    outputs:
+      trivy_critical: ${{ steps.trivy-summary.outputs.critical }}
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install jq
+        run: sudo apt-get install -y jq
+
+      # 🔴 BUILD
       - name: Build Docker image
-        run: docker build -t ${{ secrets.DOCKER_USERNAME }}/recommendation-service:${{ inputs.image_tag }} .
-  
-      - name: Trivy Image Scan
+        id: build
+        run: |
+          docker build -t ${{ secrets.DOCKER_USERNAME }}/recommendation-service:${{ inputs.image_tag }} .
+        continue-on-error: true
+
+      # 🔍 TRIVY SCAN (JSON for parsing + SARIF for GitHub)
+      - name: Trivy JSON Scan
+        id: trivy-json
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ secrets.DOCKER_USERNAME }}/recommendation-service:${{ inputs.image_tag }}
+          format: 'json'
+          output: 'trivy.json'
+          severity: 'CRITICAL'
+          exit-code: '0'
+
+      - name: Extract Trivy Critical Count
+        id: trivy-summary
+        run: |
+          CRITICAL=$(jq '[.Results[].Vulnerabilities[]? | select(.Severity=="CRITICAL")] | length' trivy.json)
+          echo "critical=$CRITICAL" >> $GITHUB_OUTPUT
+
+      # 📤 SARIF upload (for GitHub Security tab)
+      - name: Trivy SARIF Scan
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: ${{ secrets.DOCKER_USERNAME }}/recommendation-service:${{ inputs.image_tag }}
@@ -37,14 +65,58 @@ jobs:
       - name: Upload Trivy SARIF to GitHub
         uses: github/codeql-action/upload-sarif@v4
         with:
-            sarif_file: trivy.sarif
+          sarif_file: trivy.sarif
 
+      # 🔐 LOGIN
       - name: Login to Docker Hub
+        id: login
         uses: docker/login-action@v2
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
+        continue-on-error: true
 
+      # 🚀 PUSH
       - name: Push Docker image
+        id: push
         run: docker push ${{ secrets.DOCKER_USERNAME }}/recommendation-service:${{ inputs.image_tag }}
+        continue-on-error: true
 
+      # 🔔 SLACK NOTIFICATION
+      - name: Slack Notification
+        if: always()
+        run: |
+          BUILD_STATUS="${{ steps.build.outcome }}"
+          PUSH_STATUS="${{ steps.push.outcome }}"
+          CRITICAL="${{ steps.trivy-summary.outputs.critical }}"
+
+          if [ "$BUILD_STATUS" != "success" ]; then
+            BUILD_MSG="❌ Docker Build FAILED"
+          else
+            BUILD_MSG="✅ Docker Build SUCCESS"
+          fi
+
+          if [ "$PUSH_STATUS" != "success" ]; then
+            PUSH_MSG="❌ Docker Push FAILED"
+          else
+            PUSH_MSG="✅ Docker Push SUCCESS"
+          fi
+
+          curl -X POST -H 'Content-type: application/json' \
+          --data "{
+            \"attachments\": [
+              {
+                \"color\": \"#36a64f\",
+                \"text\": \"🐳 DOCKER PIPELINE REPORT\n\n
+                $BUILD_MSG\n
+                $PUSH_MSG\n\n
+                🔍 TRIVY (CRITICAL):
+                Critical Issues: $CRITICAL\n\n
+                Repo: ${{ github.repository }}
+                Branch: ${{ github.ref_name }}
+                Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+                \"
+              }
+            ]
+          }" \
+          ${{ secrets.SLACK_WEBHOOK_URL }}
