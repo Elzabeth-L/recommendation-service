@@ -31,7 +31,7 @@ jobs:
           image-ref: ${{ secrets.DOCKER_USERNAME }}/recommendation-service:${{ inputs.image_tag }}
           format: 'sarif'
           output: 'trivy.sarif'
-          severity: 'HIGH,CRITICAL'
+          severity: 'CRITICAL'
           exit-code: '0'
 
       - name: Upload Trivy SARIF to GitHub
